@@ -1,19 +1,5 @@
 #!/usr/local/bin/python3.4
 # -*- coding: utf-8 -*-
-"""
-# Defining the SleepServer API:
-## HTTP-GET:
-    api=sleepServer&get:
-        get=status -> {'status': 'standby'}
-        get=status -> {'status': 'goingToSleep', 'seconds': '[int]'}
-
-    api=sleepServer&set:
-        set=sleepTime -> {'errorMessage': 'bad sleep time'}
-        set=sleepTime -> {'acknoledge': 'setSleepTime', 'status': 'goingToSleep', 'seconds': '[int]'}
-
-    [any other request] -> {'errorMessage': 'wrong address, no such resource'}
-
-"""
 
 import time
 from daemonize import Daemonize
@@ -22,13 +8,13 @@ import urllib.parse
 import argparse
 import pprint
 import json
-import threading
+from threading import Thread, Event, Timer
 from queue import Queue
 import subprocess
 
 
 
-class RgeeHelper:
+class IssetHelper:
     def isset(self, dictionary, key):
         try:
             dictionary[key]
@@ -39,7 +25,21 @@ class RgeeHelper:
 
 
 
-class HTTPHandler(BaseHTTPRequestHandler, RgeeHelper):
+class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
+    """
+    # Defining the SleepServer API:
+    ## HTTP-GET:
+        api=sleepServer&get:
+            get=status -> {'status': 'standby'}
+            get=status -> {'status': 'goingToSleep', 'seconds': '[int]'}
+
+        api=sleepServer&set:
+            set=sleepTime -> {'errorMessage': 'bad sleep time'}
+            set=sleepTime -> {'acknoledge': 'setSleepTime', 'status': 'goingToSleep', 'seconds': '[int]'}
+
+        [any other request] -> {'errorMessage': 'wrong address, no such resource'}
+
+    """
     def setSleepServer(self, sleepServer):
         self.sleepServer = sleepServer
 
@@ -52,15 +52,7 @@ class HTTPHandler(BaseHTTPRequestHandler, RgeeHelper):
         if self.isset(query, 'api') and query['api'] == 'sleepServer':
             if self.isset(query, 'get'):
                 if query['get'] == 'status':
-                    if self.sleepServer.status != 'standby':
-                        if self.sleepServer.timeToSleep > 0:
-                            returnDict['seconds'] = self.sleepServer.timeToSleep
-                        else:
-                            # update status information after waking up again
-                            self.sleepServer.status = 'standby'
-                            self.sleepServer.timeToSleep = -1
-
-                    returnDict = {'status': self.sleepServer.status}
+                    returnDict = self.sleepServer.requestGetStatus()
 
             if self.isset(query, 'set'):
                 if query['set'] == 'sleepTime' and self.isset(query, 'seconds'):
@@ -84,83 +76,141 @@ class HTTPHandler(BaseHTTPRequestHandler, RgeeHelper):
 
 
 
-class SleepServer:
-    def __init__(self, port):
+class AsyncNetworkManager(Thread, IssetHelper):
+    def __init__(self, queue, serverEvent, event, port):
         # define members:
-        self.status = 'standby'
+        self.communicationQueue = queue
+        self.serverEvent = serverEvent
+        self.networkEvent = event
         self.serverPort = port
 
         # inital method calls
-        self.startAsyncSystemController()
-        # self.startNetworking()
-        self.setSleeptime(5)
+        Thread.__init__(self)
 
-    def startAsyncSystemController(self):
-        self.asyncSystemControllerQueue = Queue()
-        self.timerController = threading.Event()
-
-        self.systemController = AsyncSystemControl(event = self.timerController, queue = self.asyncSystemControllerQueue)
-        self.systemController.start()
-
-    def startNetworking(self):
+    def run(self):
         httpHandler = HTTPHandler
         httpHandler.setSleepServer(httpHandler, self)
 
         try:
             # Create a web server and define the handler to manage the incoming request
             server = HTTPServer(('', self.serverPort), httpHandler)
-            print('Started a HTTP-Server on port ', self.serverPort)
+            print('AsyncNetworkManager: Started a HTTP-Server on port ', self.serverPort)
 
-            # Wait forever for incoming htto requests
+            # Wait forever for incoming http requests
             server.serve_forever()
 
         except KeyboardInterrupt:
-            print(' Received interrupt signal; shutting down the web server!')
+            print(' received interrupt signal; shutting down the web server!')
             server.socket.close()
+
+    def requestGetStatus(self):
+        # send status request to sleep server via communication queue
+        self.communicationQueue.put({'get': 'status'})
+        self.serverEvent.set()
+
+        # wait for answer & process it
+        self.networkEvent.wait()
+        self.networkEvent.clear()
+
+        communicatedMessage = self.communicationQueue.get()
+        if self.isset(communicatedMessage, 'status'):
+            return communicatedMessage
+        else:
+            print('AsyncNetworkManager: can\'t read queued values!')
+            pprint.pprint(communicatedMessage)
+
+
+
+class SleepServer(Thread, IssetHelper):
+    """
+    Controll object of system sleep.
+    Legend of dictionary used in the communication queue between this and the network manager:
+
+    {'set': 'timer', 'time': [INT]} // sets time to sleep
+    {'unset': 'timer'} // stops the timer from setting a sleep time
+    {'get': 'status'} -> {'status': [STRING] (, 'timeToSleep': [INT])} // returns the time until sleep in seconds through the communication queue
+    """
+
+    def __init__(self, port):
+        # define members:
+        self.communicationQueue = Queue()
+        self.checkQueueEvent = Event()
+        self.networkQueueEvent = Event()
+
+        self.timerRunning = Event()
+        self.timeToSleep = -1
+        self.status = 'standby'
+
+        # inital method calls
+        Thread.__init__(self)
+        self.networkManager = AsyncNetworkManager(self.communicationQueue, self.checkQueueEvent, self.networkQueueEvent, port)
+        self.networkManager.start()
+
+    def run(self):
+        print('SleepServer thread up and running...')
+        self.timerTick()
+
+        while self.checkQueueEvent.wait():
+            self.checkQueueEvent.clear()
+            communicatedMessage = self.communicationQueue.get()
+            if self.isset(communicatedMessage, 'set'):
+                if communicatedMessage['set'] == 'timer' and self.isset(communicatedMessage, 'time'):
+                    print('SleepServer: received sleep time, set to', time)
+                    self.status = 'goingToSleep'
+                    self.timeToSleep = communicatedMessage['time']
+                    self.timerRunning.set()
+
+            elif self.isset(communicatedMessage, 'unset'):
+                if communicatedMessage['unset'] == 'timer':
+                    print('SleepServer: stop timer')
+                    self.cancelSleep()
+
+            elif self.isset(communicatedMessage, 'get'):
+                if communicatedMessage['get'] == 'status':
+                    print('SleepServer: return status via communication queue')
+                    if self.status != 'standby':
+                        self.communicationQueue.put({'status': self.status, 'timeToSleep': self.timeToSleep})
+                    else:
+                        self.communicationQueue.put({'status': self.status})
+                    self.networkQueueEvent.set()
+
+            else:
+                print('SleepServer: can\'t read queued values!')
+                pprint.pprint(communicatedMessage)
+
+        print('end of run!')
+
+    def timerTick(self):
+        if self.timerRunning.isSet():
+            if self.timeToSleep > 0:
+                self.timeToSleep -= 1
+                print('timer tick. Time is:', self.timeToSleep)
+            else:
+                self.timeToSleep = -1
+                self.timerRunning.clear()
+                print('timer stopped! Going to sleep from here')
+                self.sleep
+        Timer(1, self.timerTick).start()
 
     def setSleeptime(self, time):
         if time > 0:
             print('SleepServer: set sleep time to', time)
             self.status = 'goingToSleep'
-            self.asyncSystemControllerQueue.put(time)
-            # self.timerController.set()
+            self.timeToSleep = time
+            self.timerTick()
             return True
         return False
 
-    def cancleSleep(self):
-        self.timerController.clear()
-
-
-
-class AsyncSystemControl(threading.Thread):
-    def __init__(self, event, queue):
-        threading.Thread.__init__(self)
-        self.controlEvent = event
-        self.communicationQueue = queue
-        self.timeToSleep = -1
-
-    def run(self):
-        while not self.controlEvent.wait(1):
-            print('timing handler', self.timeToSleep)
-
-            if self.timeToSleep == -1:
-                print('get time to sleep out of queue')
-                self.timeToSleep = self.communicationQueue.get()
-                print('AsyncSystemControl: set sleep time to', self.timeToSleep)
-
-            if self.timeToSleep > 0:
-                self.timeToSleep -= 1
-            else:
-                self.timeToSleep = -1
-                self.sleep()
-                self.controlEvent.set()
+    def cancelSleep(self):
+        self.timerRunning.clear()
+        self.status = 'standby'
 
     def sleep(self):
-        print('sleep!')
+        print('SLEEP NOW!')
         # subprocess.call(['osascript', '-e', 'tell application "System Events" to sleep'])
 
     def shutdown(self):
-        print('shutdown!')
+        print('SHUTDOWN NOW!')
         # subprocess.call(['osascript', '-e', 'tell application "System Events" to shut down'])
 
 
@@ -170,6 +220,7 @@ class AsyncSystemControl(threading.Thread):
 # ************************************************
 def main(port = 4444):
     serverInstance = SleepServer(port)
+    serverInstance.start()
 
 # check if this code is run as a module or was included into another project
 if __name__ == "__main__":
