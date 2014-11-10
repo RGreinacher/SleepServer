@@ -39,9 +39,11 @@ class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
 
         [any other request] -> {'errorMessage': 'wrong address, no such resource'}
 
+    ## Test calls:
+        - [status request](http://localhost:4444/?api=sleepServer&get=status)
     """
-    def setSleepServer(self, sleepServer):
-        self.sleepServer = sleepServer
+    def setSleepServer(self, networkManager):
+        self.networkManager = networkManager
 
     def do_GET(self):
         queryString = urllib.parse.urlparse(self.path).query
@@ -52,12 +54,12 @@ class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
         if self.isset(query, 'api') and query['api'] == 'sleepServer':
             if self.isset(query, 'get'):
                 if query['get'] == 'status':
-                    returnDict = self.sleepServer.requestGetStatus()
+                    returnDict = self.networkManager.requestGetStatus()
 
             if self.isset(query, 'set'):
                 if query['set'] == 'sleepTime' and self.isset(query, 'seconds'):
-                    if self.sleepServer.setSleeptime(int(query['seconds'])):
-                        returnDict = {'acknoledge': 'setSleepTime', 'status': self.sleepServer.status, 'seconds': str(self.sleepServer.timeToSleep)}
+                    if self.networkManager.setSleeptime(int(query['seconds'])):
+                        returnDict = {'acknoledge': 'setSleepTime', 'status': self.networkManager.status, 'seconds': str(self.networkManager.timeToSleep)}
                     else:
                         returnDict = {'errorMessage': 'bad sleep time'}
 
@@ -145,6 +147,7 @@ class SleepServer(Thread, IssetHelper):
         Thread.__init__(self)
         self.networkManager = AsyncNetworkManager(self.communicationQueue, self.checkQueueEvent, self.networkQueueEvent, port)
         self.networkManager.start()
+        self.setSleeptime(8) # debug
 
     def run(self):
         print('SleepServer thread up and running...')
@@ -186,10 +189,9 @@ class SleepServer(Thread, IssetHelper):
                 self.timeToSleep -= 1
                 print('timer tick. Time is:', self.timeToSleep)
             else:
-                self.timeToSleep = -1
-                self.timerRunning.clear()
                 print('timer stopped! Going to sleep from here')
-                self.sleep
+                self.cancelSleep()
+                self.sleep()
         Timer(1, self.timerTick).start()
 
     def setSleeptime(self, time):
@@ -197,12 +199,13 @@ class SleepServer(Thread, IssetHelper):
             print('SleepServer: set sleep time to', time)
             self.status = 'goingToSleep'
             self.timeToSleep = time
-            self.timerTick()
+            self.timerRunning.set()
             return True
         return False
 
     def cancelSleep(self):
         self.timerRunning.clear()
+        self.timeToSleep = -1
         self.status = 'standby'
 
     def sleep(self):
