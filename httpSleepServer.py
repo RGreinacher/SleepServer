@@ -80,7 +80,7 @@ class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
                 elif query['set'] == 'sleepTime' and self.isset(query, 'seconds'):
                     if self.isInt(query['seconds']) and int(query['seconds']) > 0:
                         returnDict = self.networkManager.setSleeptime(int(query['seconds']))
-                        returnDict['acknoledge'] = 'setSleepTime'
+                        returnDict['acknowledge'] = 'setSleepTime'
                     else:
                         returnDict = {'errorMessage': 'bad sleep time'}
 
