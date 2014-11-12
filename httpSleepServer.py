@@ -31,62 +31,71 @@ class IssetHelper:
         else:
             return True
 
+    def isValueForIndex(self, array, valueForIndex):
+        try:
+            array.index(valueForIndex)
+        except ValueError:
+            return False
+        else:
+            return True
+
 
 
 class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
     """
     # Defining the SleepServer API:
     ## HTTP-GET:
-        api=sleepServer&get:
-            get=status -> {'status': 'standby'}
-            get=status -> {'status': 'goingToSleep', 'seconds': '[int]'}
+        api/sleepServer/get:
+            get/status -> {'status': 'standby'}
+            get/status -> {'status': 'goingToSleep', 'seconds': '[int]'}
 
-        api=sleepServer&set:
-            set=immediateSleep -> {'status': 'immediateSleep'}
-            set=sleepTime&seconds=[INT] -> {'acknoledge': 'setSleepTime', 'status': 'goingToSleep', 'seconds': '[int]'}
-            set=sleepTime -> {'errorMessage': 'bad sleep time'}
+        api/sleepServer/set:
+            set/immediateSleep -> {'status': 'immediateSleep'}
+            set/sleepTime/seconds/[INT] -> {'acknoledge': 'setSleepTime', 'status': 'goingToSleep', 'seconds': '[int]'}
+            set/sleepTime -> {'errorMessage': 'bad sleep time'}
 
-        api=sleepServer&unset:
-            unset=sleepTime -> {'status': 'standby'}
+        api/sleepServer/unset:
+            unset/sleepTime -> {'status': 'standby'}
 
         [any other request] -> {'errorMessage': 'wrong address, wrong parameters or no such resource'}
 
     ## Test calls:
-        - [status request](http://localhost:4444/?api=sleepServer&get=status)
-        - [set immediate sleep](http://localhost:4444/?api=sleepServer&set=immediateSleep)
-        - [set sleep time](http://localhost:4444/?api=sleepServer&set=sleepTime&seconds=12)
-        - [unset sleep time](http://localhost:4444/?api=sleepServer&unset=sleepTime)
+        - [status request](http://localhost:4444/api/sleepServer/get/status)
+        - [set immediate sleep](http://localhost:4444/api/sleepServer/set/immediateSleep)
+        - [set sleep time](http://localhost:4444/api/sleepServer/set/sleepTime/seconds/12)
+        - [unset sleep time](http://localhost:4444/api/sleepServer/unset/sleepTime)
     """
     def setSleepServer(self, networkManager):
         self.networkManager = networkManager
 
     def do_GET(self):
-        queryString = urllib.parse.urlparse(self.path).query
-        query = dict(urllib.parse.parse_qsl(queryString))
-
+        resourceElements = self.path.split('/')
         returnDict = {}
-        if self.isset(query, 'api') and query['api'] == 'sleepServer':
+        if 'api' in resourceElements and 'sleepServer' in resourceElements:
 
             # request for keyword 'get'
-            if self.isset(query, 'get'):
-                if query['get'] == 'status':
+            if 'get' in resourceElements:
+                if 'status' in resourceElements:
                     returnDict = self.networkManager.getStatus()
 
             # request for keyword 'set'
-            elif self.isset(query, 'set'):
-                if query['set'] == 'immediateSleep':
+            elif 'set' in resourceElements:
+                if 'immediateSleep' in resourceElements:
                     returnDict = self.networkManager.sleepImmediate()
 
-                elif query['set'] == 'sleepTime' and self.isset(query, 'seconds'):
-                    if self.isInt(query['seconds']) and int(query['seconds']) > 0:
-                        returnDict = self.networkManager.setSleeptime(int(query['seconds']))
-                        returnDict['acknowledge'] = 'setSleepTime'
-                    else:
+                elif 'sleepTime' in resourceElements and 'seconds' in resourceElements:
+                    if self.isValueForIndex(resourceElements, 'seconds'):
+                        offsetIndex = resourceElements.index('seconds')
+                        if self.isInt(resourceElements[offsetIndex + 1]) and int(resourceElements[offsetIndex + 1]) > 0:
+                            returnDict = self.networkManager.setSleeptime(int(resourceElements[offsetIndex + 1]))
+                            returnDict['acknowledge'] = 'setSleepTime'
+
+                    if returnDict == {}:
                         returnDict = {'errorMessage': 'bad sleep time'}
 
             # request for keyword 'unset'
-            elif self.isset(query, 'unset'):
-                if query['unset'] == 'sleepTime':
+            elif 'unset' in resourceElements:
+                if 'sleepTime' in resourceElements:
                     returnDict = self.networkManager.unsetSleeptime()
 
         if returnDict != {}:
