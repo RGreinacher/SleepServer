@@ -1,10 +1,46 @@
 #!/usr/local/bin/python3.4
 # -*- coding: utf-8 -*-
+"""
+# Defining the SleepServer API:
+The whole API uses only HTTP GET requests to keep thing simple and make it easy to test.
+Future versions may change that to make use of HTTP PUT / PATCH and UPDATE, as well as be able to specify an API version.
+The pattern for API versioning will be 'sleepApi/1.0/[task]'. This pattern can already be used now but will not change the behaviour.
+The response format is JSON. Possible HTTP status codes are 200, 202, 400 and 404.
+Every request returns either an acknowledgement and the current status or just the current status (or an error message).
 
-import time
+## get status information
+    call: sleepApi/status
+    receive: {'status': 'running'} (HTTP: 200)
+    receive: {'status': 'goingToSleep', 'seconds': '[int]'} (HTTP: 200)
+
+## set sleep time or arrange immediate sleep
+    call: sleepApi/setSleepTime/[int]
+    receive: {'status': 'goingToSleep', 'seconds': '[int]'} (HTTP: 202)
+    receive error: {'errorMessage': 'bad sleep time'} (HTTP: 400)
+
+    call: sleepApi/immediateSleep
+    receive: {'status': 'immediateSleep'} (HTTP: 202)
+
+## unset sleep time:
+    call: sleepApi/unsetSleepTime
+    receive: {'status': 'running'} (HTTP: 202)
+    receive: {'status': 'running', 'acknowledge': 'unsetSleepTime'} (HTTP: 202)
+
+## others:
+    call: [any other request]
+    receive error: {'errorMessage': 'wrong address, wrong parameters or no such resource'} (HTTP: 404)
+
+### Test calls:
+    - [status request](http://localhost:4444/sleepApi/status)
+    - [set sleep time](http://localhost:4444/sleepApi/setSleepTime/42)
+    - [set immediate sleep](http://localhost:4444/sleepApi/immediateSleep)
+    - [unset sleep time](http://localhost:4444/sleepApi/unsetSleepTime)
+"""
+
+# import time
 from daemonize import Daemonize
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import urllib.parse
+# import urllib.parse
 import argparse
 import pprint
 import json
@@ -42,68 +78,49 @@ class IssetHelper:
 
 
 class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
-    """
-    # Defining the SleepServer API:
-    ## HTTP-GET:
-        api/sleepServer/get:
-            get/status -> {'status': 'standby'}
-            get/status -> {'status': 'goingToSleep', 'seconds': '[int]'}
-
-        api/sleepServer/set:
-            set/immediateSleep -> {'status': 'immediateSleep'}
-            set/sleepTime/seconds/[INT] -> {'acknoledge': 'setSleepTime', 'status': 'goingToSleep', 'seconds': '[int]'}
-            set/sleepTime -> {'errorMessage': 'bad sleep time'}
-
-        api/sleepServer/unset:
-            unset/sleepTime -> {'status': 'standby'}
-
-        [any other request] -> {'errorMessage': 'wrong address, wrong parameters or no such resource'}
-
-    ## Test calls:
-        - [status request](http://localhost:4444/api/sleepServer/get/status)
-        - [set immediate sleep](http://localhost:4444/api/sleepServer/set/immediateSleep)
-        - [set sleep time](http://localhost:4444/api/sleepServer/set/sleepTime/seconds/12)
-        - [unset sleep time](http://localhost:4444/api/sleepServer/unset/sleepTime)
-    """
     def setSleepServer(self, networkManager):
         self.networkManager = networkManager
 
     def do_GET(self):
         resourceElements = self.path.split('/')
         returnDict = {}
-        if 'api' in resourceElements and 'sleepServer' in resourceElements:
+        if 'sleepApi' in resourceElements:
 
-            # request for keyword 'get'
-            if 'get' in resourceElements:
-                if 'status' in resourceElements:
-                    returnDict = self.networkManager.getStatus()
+            # status requests:
+            if 'status' in resourceElements:
+                returnDict = self.networkManager.getStatus()
+                self.send_response(200)
 
-            # request for keyword 'set'
-            elif 'set' in resourceElements:
-                if 'immediateSleep' in resourceElements:
-                    returnDict = self.networkManager.sleepImmediate()
+            # set sleep requests:
+            elif 'setSleepTime' in resourceElements:
+                if (self.isValueForIndex(resourceElements, 'setSleepTime') and
+                    self.isInt(resourceElements[resourceElements.index('setSleepTime') + 1]) and
+                    int(resourceElements[resourceElements.index('setSleepTime') + 1]) > 0):
+                    
+                    # sleep time identified and correct
+                    returnDict = self.networkManager.setSleeptime(int(resourceElements[resourceElements.index('setSleepTime') + 1]))
+                    self.send_response(202)
 
-                elif 'sleepTime' in resourceElements and 'seconds' in resourceElements:
-                    if self.isValueForIndex(resourceElements, 'seconds'):
-                        offsetIndex = resourceElements.index('seconds')
-                        if self.isInt(resourceElements[offsetIndex + 1]) and int(resourceElements[offsetIndex + 1]) > 0:
-                            returnDict = self.networkManager.setSleeptime(int(resourceElements[offsetIndex + 1]))
-                            returnDict['acknowledge'] = 'setSleepTime'
+                else:
+                    # sleep time not set, not right after the 'setSleepTime' keywork in the request, not an integer or not greater than 0
+                    returnDict = {'errorMessage': 'bad sleep time'}
+                    self.send_response(400)
 
-                    if returnDict == {}:
-                        returnDict = {'errorMessage': 'bad sleep time'}
+            elif 'immediateSleep' in resourceElements:
+                returnDict = self.networkManager.sleepImmediate()
+                self.send_response(202)
 
-            # request for keyword 'unset'
-            elif 'unset' in resourceElements:
-                if 'sleepTime' in resourceElements:
-                    returnDict = self.networkManager.unsetSleeptime()
+            # unset sleep time requests:
+            elif 'unsetSleepTime' in resourceElements:
+                returnDict = self.networkManager.unsetSleeptime()
+                self.send_response(202)
 
-        if returnDict != {}:
-            self.send_response(200)
-        else:
+        # error handling for all other requests:
+        if returnDict == {}:
             self.send_response(404)
             returnDict = {'errorMessage': 'wrong address, wrong parameters or no such resource'}
 
+        # headers and define the response content type
         self.send_header('Content-type', 'application/json')
         self.end_headers()
 
@@ -173,12 +190,11 @@ class AsyncNetworkManager(Thread, IssetHelper):
 class SleepServer(Thread, IssetHelper):
     """
     Controll object of system sleep.
-    Legend of dictionary used in the communication queue between this and the network manager:
+    Definition of the dictionary used in the communication queue between this and the network manager:
 
     {'set': 'immediateSleep'} -> {'status': [STRING]}
-    {'set': 'timer', 'time': [INT]} -> {'status': [STRING]} or {'status': [STRING], 'timeToSleep': [INT]}
-    {'set': 'timer', 'time': [INT]} -> {'status': [STRING], 'error': 'bad sleep time'} or {'status': [STRING], 'timeToSleep': [INT], 'error': 'bad sleep time'}
-    {'unset': 'timer'} -> {'status': [STRING]} or {'status': [STRING], 'timeToSleep': [INT]}
+    {'set': 'timer', 'time': [INT]} -> {'status': [STRING], 'error': 'bad sleep time'} or {'status': [STRING], 'timeToSleep': [INT]}
+    {'unset': 'timer'} -> {'status': [STRING]} or {'status': [STRING], 'acknowledge': 'unsetSleepTime'}
     {'get': 'status'} -> {'status': [STRING]} or {'status': [STRING], 'timeToSleep': [INT]}
     """
 
@@ -190,7 +206,7 @@ class SleepServer(Thread, IssetHelper):
 
         self.timerRunning = Event()
         self.timeToSleep = -1
-        self.status = 'standby'
+        self.status = 'running'
 
         # inital method calls
         Thread.__init__(self)
@@ -222,8 +238,12 @@ class SleepServer(Thread, IssetHelper):
 
             elif self.isset(communicatedMessage, 'unset'):
                 if communicatedMessage['unset'] == 'timer':
-                    self.resetServer()
-                    self.setStatusResponse()
+                    if self.timeToSleep >= 0:
+                        self.resetServer()
+                        self.communicationQueue.put({'status': self.status, 'acknowledge': 'unsetSleepTime'})
+                        self.networkQueueEvent.set()
+                    else:
+                        self.setStatusResponse()
 
             elif self.isset(communicatedMessage, 'get'):
                 if communicatedMessage['get'] == 'status':
@@ -257,7 +277,7 @@ class SleepServer(Thread, IssetHelper):
     def resetServer(self):
         self.timerRunning.clear()
         self.timeToSleep = -1
-        self.status = 'standby'
+        self.status = 'running'
 
     def setStatusResponse(self):
         if self.timeToSleep >= 0:
