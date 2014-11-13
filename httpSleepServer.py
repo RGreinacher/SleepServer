@@ -35,6 +35,10 @@ Every request returns either an acknowledgement and the current status or just t
     - [set sleep time](http://localhost:4444/sleepApi/setSleepTime/42)
     - [set immediate sleep](http://localhost:4444/sleepApi/immediateSleep)
     - [unset sleep time](http://localhost:4444/sleepApi/unsetSleepTime)
+
+# ToDos:
+    - make an API argument for only sleep / sleep with volumen controll
+    - status with current volume
 """
 
 # import time
@@ -206,6 +210,7 @@ class SleepServer(Thread, IssetHelper):
 
         self.timerRunning = Event()
         self.timeToSleep = -1
+        self.initialSleepTime = -1
         self.status = 'running'
 
         # inital method calls
@@ -231,6 +236,7 @@ class SleepServer(Thread, IssetHelper):
                     if self.isInt(communicatedMessage['time']):
                         self.status = 'goingToSleep'
                         self.timeToSleep = int(communicatedMessage['time'])
+                        self.initialSleepTime = self.timeToSleep
                         self.timerRunning.set()
                         self.setStatusResponse()
                     else:
@@ -257,6 +263,7 @@ class SleepServer(Thread, IssetHelper):
         if self.timerRunning.isSet():
             if self.timeToSleep > 0:
                 self.timeToSleep -= 1
+                self.volumeControl((100 * self.timeToSleep) / self.initialSleepTime) # make this optional
                 print('Timer tick, sleep in', self.timeToSleep)
             else:
                 print('Timer stopped, going to sleep now')
@@ -299,7 +306,16 @@ class SleepServer(Thread, IssetHelper):
     def sleep(self):
         print('Sleep now. Good night!')
         self.resetServer()
-        subprocess.call(['osascript', '-e', 'tell application "System Events" to sleep'])
+        # subprocess.call(['osascript', '-e', 'tell application "System Events" to sleep'])
+
+    def volumeControl(self, percent):
+        if percent > 100:
+            percent = 100
+        elif percent < 0:
+            percent = 0
+
+        targetVolume = (7 * percent) / 100
+        subprocess.call(['osascript', '-e', 'Set volume ' + str(targetVolume)])
 
     # def shutdown(self):
     #     print('SHUTDOWN NOW!')
