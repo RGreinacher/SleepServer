@@ -1,57 +1,15 @@
 #!/usr/local/bin/python3.4
 # -*- coding: utf-8 -*-
-"""
-# Defining the SleepServer API:
-The whole API uses only HTTP GET requests to keep thing simple and make it easy to test.
-Future versions may change that to make use of HTTP PUT / PATCH and UPDATE, as well as be able to specify an API version.
-The pattern for API versioning will be 'sleepApi/1.0/[task]'. This pattern can already be used now but will not change the behaviour.
-The response format is JSON. Possible HTTP status codes are 200, 202, 400 and 404.
-Every request returns either an acknowledgement and the current status or just the current status (or an error message).
+# Read the description.md for a basic understanding of the server API.
 
-## get status information
-    call: sleepApi/status
-    receive: {'status': 'running'} (HTTP: 200)
-    receive: {'status': 'goingToSleep', 'seconds': '[int]'} (HTTP: 200)
-
-## set sleep time or arrange immediate sleep
-    call: sleepApi/setSleepTime/[int]
-    receive: {'status': 'goingToSleep', 'seconds': '[int]'} (HTTP: 202)
-    receive error: {'errorMessage': 'bad sleep time'} (HTTP: 400)
-
-    call: sleepApi/immediateSleep
-    receive: {'status': 'immediateSleep'} (HTTP: 202)
-
-## unset sleep time:
-    call: sleepApi/unsetSleepTime
-    receive: {'status': 'running'} (HTTP: 202)
-    receive: {'status': 'running', 'acknowledge': 'unsetSleepTime'} (HTTP: 202)
-
-## others:
-    call: [any other request]
-    receive error: {'errorMessage': 'wrong address, wrong parameters or no such resource'} (HTTP: 404)
-
-### Test calls:
-    - [status request](http://localhost:4444/sleepApi/status)
-    - [set sleep time](http://localhost:4444/sleepApi/setSleepTime/42)
-    - [set immediate sleep](http://localhost:4444/sleepApi/immediateSleep)
-    - [unset sleep time](http://localhost:4444/sleepApi/unsetSleepTime)
-
-# ToDos:
-    - make an API argument for only sleep / sleep with volumen controll
-    - status with current volume
-"""
-
-# import time
-from daemonize import Daemonize
-from http.server import BaseHTTPRequestHandler, HTTPServer
-# import urllib.parse
-import argparse
-import pprint
-import json
 from threading import Thread, Event, Timer
 from queue import Queue
+from daemonize import Daemonize
+import argparse
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
 import subprocess
-
+import pprint
 
 
 class IssetHelper:
@@ -152,13 +110,13 @@ class AsyncNetworkManager(Thread, IssetHelper):
         try:
             # Create a web server and define the handler to manage the incoming request
             server = HTTPServer(('', self.serverPort), httpHandler)
-            print('AsyncNetworkManager: HTTP server thread up and running; port', self.serverPort)
+            print('SleepServer is up and running at port:', self.serverPort)
 
             # Wait forever for incoming http requests
             server.serve_forever()
 
         except KeyboardInterrupt:
-            print(' received interrupt signal; shutting down the web server!')
+            print(' received interrupt signal; shutting down the HTTP server!')
             server.socket.close()
 
     def sleepServerRequest(self, message):
@@ -193,7 +151,7 @@ class AsyncNetworkManager(Thread, IssetHelper):
 
 class SleepServer(Thread, IssetHelper):
     """
-    Controll object of system sleep.
+    Control object of system sleep.
     Definition of the dictionary used in the communication queue between this and the network manager:
 
     {'set': 'immediateSleep'} -> {'status': [STRING]}
@@ -220,7 +178,6 @@ class SleepServer(Thread, IssetHelper):
         # self.setSleeptime(8) # debug
 
     def run(self):
-        print('SleepServer: Controller thread up and running')
         self.timerTick()
 
         while self.checkQueueEvent.wait():
@@ -264,9 +221,7 @@ class SleepServer(Thread, IssetHelper):
             if self.timeToSleep > 0:
                 self.timeToSleep -= 1
                 self.volumeControl((100 * self.timeToSleep) / self.initialSleepTime) # make this optional
-                print('Timer tick, sleep in', self.timeToSleep)
             else:
-                print('Timer stopped, going to sleep now')
                 self.sleep()
         Timer(1, self.timerTick).start()
 
@@ -306,7 +261,7 @@ class SleepServer(Thread, IssetHelper):
     def sleep(self):
         print('Sleep now. Good night!')
         self.resetServer()
-        # subprocess.call(['osascript', '-e', 'tell application "System Events" to sleep'])
+        subprocess.call(['osascript', '-e', 'tell application "System Events" to sleep'])
 
     def volumeControl(self, percent):
         if percent > 100:
