@@ -8,8 +8,8 @@ from daemonize import Daemonize
 import argparse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
-import subprocess
 import pprint
+import systemControl
 
 
 class IssetHelper:
@@ -24,6 +24,14 @@ class IssetHelper:
     def isInt(self, integer):
         try:
             int(integer)
+        except (ValueError, TypeError) as e:
+            return False
+        else:
+            return True
+
+    def isFloat(self, float):
+        try:
+            float(float)
         except (ValueError, TypeError) as e:
             return False
         else:
@@ -48,39 +56,74 @@ class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
         returnDict = {}
         if 'sleepApi' in resourceElements:
 
-            # status requests:
-            if 'status' in resourceElements:
-                returnDict = self.networkManager.getStatus()
-                self.send_response(200)
+            # set requests:
+            if 'immediateSleep' in resourceElements:
+                returnDict = self.networkManager.sleepImmediate()
+                self.send_response(202)
 
-            # set sleep requests:
+            # set sleep time
             elif 'setSleepTime' in resourceElements:
                 if (self.isValueForIndex(resourceElements, 'setSleepTime') and
                     self.isInt(resourceElements[resourceElements.index('setSleepTime') + 1]) and
                     int(resourceElements[resourceElements.index('setSleepTime') + 1]) > 0):
                     
                     # sleep time identified and correct
-                    returnDict = self.networkManager.setSleeptime(int(resourceElements[resourceElements.index('setSleepTime') + 1]))
+                    returnDict = self.networkManager.setSleepTime(int(resourceElements[resourceElements.index('setSleepTime') + 1]))
                     self.send_response(202)
 
                 else:
                     # sleep time not set, not right after the 'setSleepTime' keywork in the request, not an integer or not greater than 0
+                    if kBeVerbose: print('NetworkManager: error parsing sleep time')
                     returnDict = {'errorMessage': 'bad sleep time'}
                     self.send_response(400)
 
-            elif 'immediateSleep' in resourceElements:
-                returnDict = self.networkManager.sleepImmediate()
+            # set silence time
+            elif 'setSilenceTime' in resourceElements:
+                if (self.isValueForIndex(resourceElements, 'setSilenceTime') and
+                    self.isInt(resourceElements[resourceElements.index('setSilenceTime') + 1]) and
+                    int(resourceElements[resourceElements.index('setSilenceTime') + 1]) > 0):
+                    
+                    # silence time identified and correct
+                    returnDict = self.networkManager.setSilenceTime(int(resourceElements[resourceElements.index('setSilenceTime') + 1]))
+                    self.send_response(202)
+
+                else:
+                    # silence time not set, not right after the 'setSilenceTime' keywork in the request, not an integer or not greater than 0
+                    if kBeVerbose: print('NetworkManager: error parsing silence time')
+                    returnDict = {'errorMessage': 'bad silence time'}
+                    self.send_response(400)
+
+            # set good night time
+            elif 'setGoodNightTime' in resourceElements:
+                if (self.isValueForIndex(resourceElements, 'setGoodNightTime') and
+                    self.isFloat(resourceElements[resourceElements.index('setGoodNightTime') + 1]) and
+                    float(resourceElements[resourceElements.index('setGoodNightTime') + 1]) > 0):
+                    
+                    # good night time identified and correct
+                    returnDict = self.networkManager.setGoodNightTime(float(resourceElements[resourceElements.index('setGoodNightTime') + 1]))
+                    self.send_response(202)
+
+                else:
+                    # good night time not set, not right after the 'setGoodNightTime' keywork in the request, not an integer or not greater than 0
+                    if kBeVerbose: print('NetworkManager: error parsing good night time')
+                    returnDict = {'errorMessage': 'bad good night time'}
+                    self.send_response(400)
+
+            # unset / reset requests:
+            elif 'reset' in resourceElements:
+                returnDict = self.networkManager.unsetTimer()
                 self.send_response(202)
 
-            # unset sleep time requests:
-            elif 'unsetSleepTime' in resourceElements:
-                returnDict = self.networkManager.unsetSleeptime()
-                self.send_response(202)
+            # status requests:
+            elif 'status' in resourceElements:
+                returnDict = self.networkManager.getStatus()
+                self.send_response(200)
 
         # error handling for all other requests:
         if returnDict == {}:
-            self.send_response(404)
+            if kBeVerbose: print('NetworkManager: request with unrecognized arguments')
             returnDict = {'errorMessage': 'wrong address, wrong parameters or no such resource'}
+            self.send_response(404)
 
         # headers and define the response content type
         self.send_header('Content-type', 'application/json')
@@ -129,7 +172,7 @@ class AsyncNetworkManager(Thread, IssetHelper):
         self.networkEvent.clear()
 
         communicatedMessage = self.communicationQueue.get()
-        if self.isset(communicatedMessage, 'status'):
+        if self.isset(communicatedMessage, 'status') || self.isset(communicatedMessage, 'error'):
             return communicatedMessage
         else:
             print('AsyncNetworkManager: can\'t read queued values!')
@@ -138,10 +181,19 @@ class AsyncNetworkManager(Thread, IssetHelper):
     def sleepImmediate(self):
         return self.sleepServerRequest({'set': 'immediateSleep'})
 
-    def setSleeptime(self, time):
-        return self.sleepServerRequest({'set': 'timer', 'time': time})
+    def setSleepTime(self, time):
+        return self.sleepServerRequest({'set': 'sleepTimer', 'time': time})
 
-    def unsetSleeptime(self):
+    def setSilenceTime(self, time):
+        return self.sleepServerRequest({'set': 'silenceTimer', 'time': time})
+
+    def setGoodNightTime(self, time):
+        return self.sleepServerRequest({'set': 'goodNightTimer', 'time': time})
+
+    def setVolume(self, percent):
+        return self.sleepServerRequest({'set': 'volume', 'percent': percent})
+
+    def unsetTimer(self):
         return self.sleepServerRequest({'unset': 'timer'})
 
     def getStatus(self):
@@ -152,12 +204,15 @@ class AsyncNetworkManager(Thread, IssetHelper):
 class SleepServer(Thread, IssetHelper):
     """
     Control object of system sleep.
-    Definition of the dictionary used in the communication queue between this and the network manager:
+    Definition of the dictionary used in the communication queue between the sleep server and the network manager:
 
-    {'set': 'immediateSleep'} -> {'status': [STRING]}
-    {'set': 'timer', 'time': [INT]} -> {'status': [STRING], 'error': 'bad sleep time'} or {'status': [STRING], 'timeToSleep': [INT]}
-    {'unset': 'timer'} -> {'status': [STRING]} or {'status': [STRING], 'acknowledge': 'unsetSleepTime'}
-    {'get': 'status'} -> {'status': [STRING]} or {'status': [STRING], 'timeToSleep': [INT]}
+    {'set': 'immediateSleep'}
+    {'set': 'sleepTimer', 'time': [INT]}
+    {'set': 'silenceTimer', 'time': [INT]}
+    {'set': 'goodNightTimer', 'time': [INT]}
+    {'set': 'volume', 'percent': [float]}
+    {'unset': 'timer'}
+    {'get': 'status'}
     """
 
     def __init__(self, port):
@@ -165,17 +220,25 @@ class SleepServer(Thread, IssetHelper):
         self.communicationQueue = Queue()
         self.checkQueueEvent = Event()
         self.networkQueueEvent = Event()
+        self.systemControl = SystemControl(kBeVerbose)
 
         self.timerRunning = Event()
+        self.sleepTimeRunning = Event()
+        self.silenceTimeRunning = Event()
+        self.goodNightTimeRunning = Event()
+
         self.timeToSleep = -1
-        self.initialSleepTime = -1
-        self.status = 'running'
+        self.timeToSilence = -1
+        self.timeToGoodNight = -1
+        self.initialGoodNightTime = -1
+        self.initialSileneTime = -1
+        self.status = kNormalStatus
 
         # inital method calls
         Thread.__init__(self)
+        self.currentVolume = self.systemControl.getVolume()
         self.networkManager = AsyncNetworkManager(self.communicationQueue, self.checkQueueEvent, self.networkQueueEvent, port)
         self.networkManager.start()
-        # self.setSleeptime(8) # debug
 
     def run(self):
         self.timerTick()
@@ -183,105 +246,217 @@ class SleepServer(Thread, IssetHelper):
         while self.checkQueueEvent.wait():
             self.checkQueueEvent.clear()
             communicatedMessage = self.communicationQueue.get()
+
+            # handle set commands
             if self.isset(communicatedMessage, 'set'):
                 if communicatedMessage['set'] == 'immediateSleep':
+                    if kBeVerbose: print('SleepServer: receiving a immediateSleep command')
                     self.status = 'immediateSleep'
-                    self.setStatusResponse()
+                    self.respondToNetworkThread(self.getStatus())
                     self.sleep()
 
-                elif communicatedMessage['set'] == 'timer' and self.isset(communicatedMessage, 'time'):
+                # handle sleep timer requests
+                elif communicatedMessage['set'] == 'sleepTimer' and self.isset(communicatedMessage, 'time'):
                     if self.isInt(communicatedMessage['time']):
-                        self.status = 'goingToSleep'
+                        if kBeVerbose: print('SleepServer: receiving a setSleepTime command with', int(communicatedMessage['time']), 'seconds')
+                        self.status = kSleepTimerStatus
                         self.timeToSleep = int(communicatedMessage['time'])
-                        self.initialSleepTime = self.timeToSleep
-                        self.timerRunning.set()
-                        self.setStatusResponse()
-                    else:
-                        self.setErrorResponse()
 
+                        self.sleepTimeRunning.set()
+                        self.timerRunning.set()
+                        self.respondToNetworkThread(self.getStatus())
+                    else:
+                        if kBeVerbose: print('SleepServer: error parsing the received setSleepTime command')
+                        self.respondToNetworkThread({'error': 'bad sleep time'})
+
+                # handle silence timer requests
+                elif communicatedMessage['set'] == 'silenceTimer' and self.isset(communicatedMessage, 'time'):
+                    if self.isInt(communicatedMessage['time']):
+                        if kBeVerbose: print('SleepServer: receiving a setSilenceTime command with', int(communicatedMessage['time']), 'seconds')
+                        self.status = kSilenceTimerStatus
+                        self.timeToSilence = int(communicatedMessage['time'])
+                        self.initialSileneTime = self.timeToSilence
+
+                        self.silenceTimeRunning.set()
+                        self.timerRunning.set()
+                        self.respondToNetworkThread(self.getStatus())
+                    else:
+                        if kBeVerbose: print('SleepServer: error parsing the received setSilenceTime command')
+                        self.respondToNetworkThread({'error': 'bad sleep time'})
+
+                # handle good night timer requests
+                elif communicatedMessage['set'] == 'goodNightTimer' and self.isset(communicatedMessage, 'time'):
+                    if self.isInt(communicatedMessage['time']):
+                        if kBeVerbose: print('SleepServer: receiving a setGoodNightTime command with', int(communicatedMessage['time']), 'seconds')
+                        self.status = kGoodNightTimerStatus
+                        self.timeToGoodNight = int(communicatedMessage['time'])
+                        self.initialGoodNightTime = self.timeToGoodNight
+
+                        self.goodNightTimeRunning.set()
+                        self.timerRunning.set()
+                        self.respondToNetworkThread(self.getStatus())
+                    else:
+                        if kBeVerbose: print('SleepServer: error parsing the received setSleepTime command')
+                        self.respondToNetworkThread({'error': 'bad sleep time'})
+
+                 # handle set volume requests
+                elif communicatedMessage['set'] == 'volume' and self.isset(communicatedMessage, 'percent'):
+                    if self.isFloat(communicatedMessage['percent']):
+                        if kBeVerbose: print('SleepServer: receiving a setVolume command with', float(communicatedMessage['percent']), '%')
+                        self.volumeControl(float(communicatedMessage['percent']))
+                        self.respondToNetworkThread(self.getStatus())
+                    else:
+                        if kBeVerbose: print('SleepServer: error parsing the received setVolume command')
+                        self.respondToNetworkThread({'error': 'bad volume percentage'})
+
+            # handle reset / unset commands
             elif self.isset(communicatedMessage, 'unset'):
                 if communicatedMessage['unset'] == 'timer':
-                    if self.timeToSleep >= 0:
-                        self.resetServer()
-                        self.communicationQueue.put({'status': self.status, 'acknowledge': 'unsetSleepTime'})
-                        self.networkQueueEvent.set()
-                    else:
-                        self.setStatusResponse()
+                    if kBeVerbose: print('SleepServer: receiving a unset sleepTimer command')
+                    self.resetServer()
+                    self.respondToNetworkThread(self.getStatus())
 
+            # handle get status requests
             elif self.isset(communicatedMessage, 'get'):
                 if communicatedMessage['get'] == 'status':
-                    self.setStatusResponse()
+                    if kBeVerbose: print('SleepServer: receiving a status request')
+                    self.respondToNetworkThread(self.getStatus())
 
             else:
-                print('SleepServer: can\'t read queued values!')
+                if kBeVerbose: print('SleepServer: can\'t read values from the network manager thread!')
                 pprint.pprint(communicatedMessage)
 
     def timerTick(self):
         if self.timerRunning.isSet():
-            if self.timeToSleep > 0:
-                self.timeToSleep -= 1
-                self.volumeControl((100 * self.timeToSleep) / self.initialSleepTime) # make this optional
-            else:
-                self.sleep()
+
+            # good night time handling; sleep timer and volume decreasing
+            if self.goodNightTimeRunning.isSet():
+                if self.timeToGoodNight > 0:
+                    self.timeToGoodNight -= 1
+
+                    # start changing the volume after getting below 10 min:
+                    if self.initialGoodNightTime > kGoodNightTimeToStartWithVolumeDecrease && self.timeToGoodNight <= kGoodNightTimeToStartWithVolumeDecrease:
+                        self.volumeControl((100 * self.timeToGoodNight) / kGoodNightTimeToStartWithVolumeDecrease)
+                    elif self.initialGoodNightTime <= kGoodNightTimeToStartWithVolumeDecrease:
+                        self.volumeControl((100 * self.timeToGoodNight) / self.initialGoodNightTime)
+                else:
+                    self.sleep()
+                if kBeVerbose: print('good night timer tick:', self.timeToSleep)
+
+            # handle only the sleep time
+            elif self.sleepTimeRunning.isSet():
+                if self.timeToSleep > 0:
+                    self.timeToSleep -= 1
+                else:
+                    self.sleep()
+                if kBeVerbose: print('sleep timer tick:', self.timeToSleep)
+
+            # handle only the volume-down-to-silence-time
+            elif self.silenceTimeRunning.isSet() && self.timeToSilence > 0:
+                if self.timeToSilence > 0:
+                    self.timeToSilence -= 1
+                    self.volumeControl((100 * self.timeToSilence) / self.initialSileneTime)
+                else:
+                    self.resetServer()
+                if kBeVerbose: print('silence timer tick:', self.timeToSleep)
+
+        # keep the timer alive
         Timer(1, self.timerTick).start()
 
-    def setSleeptime(self, time):
+    def setSleepTime(self, time):
         if self.isInt(time):
             time = int(time)
             if time > 0:
-                print('SleepServer: set sleep time to', time)
-                self.status = 'goingToSleep'
+                if kBeVerbose: print('SleepServer: set sleep time to', time)
+                self.status = kSleepTimerStatus
                 self.timeToSleep = time
+                self.sleepTimeRunning.set()
+                self.timerRunning.set()
+                return True
+        return False
+
+    def setSilenceTime(self, time):
+        if self.isInt(time):
+            time = int(time)
+            if time > 0:
+                if kBeVerbose: print('SleepServer: set silence time to', time)
+                self.status = kSilenceTimerStatus
+                self.timeToSilence = time
+                self.silenceTimeRunning.set()
+                self.timerRunning.set()
+                return True
+        return False
+
+    def setGoodNightTime(self, time):
+        if self.isInt(time):
+            time = int(time)
+            if time > 0:
+                if kBeVerbose: print('SleepServer: set good night time to', time)
+                self.status = kGoodNightTimerStatus
+                self.timeToGoodNight = time
+                self.goodNightTimeRunning.set()
                 self.timerRunning.set()
                 return True
         return False
 
     def resetServer(self):
+        # reset events
         self.timerRunning.clear()
+        self.sleepTimeRunning.clear()
+        self.silenceTimeRunning.clear()
+        self.goodNightTimeRunning.clear()
+
+        # reset members
         self.timeToSleep = -1
-        self.status = 'running'
+        self.timeToSilence = -1
+        self.timeToGoodNight = -1
+        self.initialGoodNightTime = -1
+        self.initialSileneTime = -1
+        self.status = kNormalStatus
+        self.currentVolume = 100
 
-    def setStatusResponse(self):
-        if self.timeToSleep >= 0:
-            statusDictionary = {'status': self.status, 'timeToSleep': self.timeToSleep}
-        else:
-            statusDictionary = {'status': self.status}
-        self.communicationQueue.put(statusDictionary)
-        self.networkQueueEvent.set()
+        # function calls
+        self.volumeControl(self.currentVolume)
 
-    def setErrorResponse(self):
-        if self.timeToSleep >= 0:
-            statusDictionary = {'status': self.status, 'timeToSleep': self.timeToSleep}
-        else:
-            statusDictionary = {'status': self.status}
-        statusDictionary['error'] = 'bad sleep time'
-        self.communicationQueue.put(statusDictionary)
+    def getStatus(self):
+        statusDictionary = {'status': self.status, 'currentVolume': self.currentVolume}
+        if self.sleepTimeRunning.isSet() || self.goodNightTimeRunning.isSet():
+            statusDictionary['timeToSleep'] = self.timeToSleep
+        elif self.silenceTimeRunning.isSet():
+            statusDictionary['timeToSilence'] = self.timeToSilence
+
+        return statusDictionary
+
+    def respondToNetworkThread(dictionary):
+        self.communicationQueue.put(dictionary)
         self.networkQueueEvent.set()
 
     def sleep(self):
-        print('Sleep now. Good night!')
         self.resetServer()
-        subprocess.call(['osascript', '-e', 'tell application "System Events" to sleep'])
+        self.systemControl.setSleep()
 
     def volumeControl(self, percent):
         if percent > 100:
-            percent = 100
+                percent = 100
         elif percent < 0:
             percent = 0
 
-        targetVolume = (7 * percent) / 100
-        subprocess.call(['osascript', '-e', 'Set volume ' + str(targetVolume)])
-
-    # def shutdown(self):
-    #     print('SHUTDOWN NOW!')
-    #     self.resetServer()
-    #     subprocess.call(['osascript', '-e', 'tell application "System Events" to shut down'])
+        self.currentVolume = percent
+        self.systemControl.setVolume(self.currentVolume)
 
 
 
 # ************************************************
 # non object orientated entry code goes down here:
 # ************************************************
+# defining constants
+kGoodNightTimeToStartWithVolumeDecrease = 600 # 10 minutes
+kBeVerbose = False
+kNormalStatus = 'running'
+kSleepTimerStatus = 'goingToSleep'
+kSilenceTimerStatus = 'goingToSilence'
+kGoodNightTimerStatus = 'goingToSleepAndSilence'
+
 def main(port = 4444):
     serverInstance = SleepServer(port)
     serverInstance.start()
@@ -290,8 +465,12 @@ def main(port = 4444):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description = "Backend for receiving time-to-sleep signals.")
     parser.add_argument("-d", "--daemon", action = "store_true", dest = "daemon", help = "enables daemon mode")
+    parser.add_argument("-v", "--verbose", action = "store_true", dest = "verbose", help = "enables verbose mode")
     parser.add_argument("-p", "--port", type=int, help = "specifies the networking port number")
     args = parser.parse_args()
+
+    if args.verbose:
+        kBeVerbose = True
 
     if args.daemon:
         pidFile = "/tmp/sleepServerDaemon.pid"

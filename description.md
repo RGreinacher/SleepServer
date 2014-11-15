@@ -36,6 +36,7 @@ Install Python3 and make sure the following required modules are available:
 - [http.server](https://docs.python.org/3/library/http.server.html)
 - [json](https://docs.python.org/3/library/json.html)
 - [subprocess](https://docs.python.org/3/library/subprocess.html)
+- [platform](https://docs.python.org/3/library/platform.html)
 - [pprint](https://docs.python.org/3/library/pprint.html)
 
 Now just run the server with default parameters (not a daemon, port 4444), you won't need administration privileges to do that:
@@ -91,12 +92,12 @@ Set immediate sleep:
 
 ## set the silence time / volume
 
-Set the volume in a percent value (decimal):
+Set the volume percentage (decimal):
 
     call: sleepApi/setVolume/[decimal]
     receive: {'status': 'running', 'currentVolume': [decimal]} (HTTP: 202)
     receive: {'status': 'goingToSleep', 'timeToSleep': '[int]', 'currentVolume': [decimal]} (HTTP: 200)
-    receive error: {'errorMessage': 'bad volume percent value'} (HTTP: 400)
+    receive error: {'errorMessage': 'bad volume percentage'} (HTTP: 400)
 
 Set only the silence time:
 
@@ -113,19 +114,13 @@ The good night time is a combination of both, the sleep and the silence time. If
 	receive error: {'errorMessage': 'bad good night time'} (HTTP: 400)
 
 
-## unset sleep / silence / good night time:
+## unset timer / reset the server:
 
-Use the following command for both, unsetting thehe sleep time and unsetting the good night time (in the latter the volume will stay as it currently is):
+Use one command for unsetting all timers and resetting the server:
 
-    call: sleepApi/unsetSleepTime
+    call: sleepApi/reset
     receive: {'status': 'running', 'currentVolume': [decimal]} (HTTP: 202)
-    receive: {'status': 'running', 'acknowledge': 'unsetSleepTime', 'currentVolume': [decimal]} (HTTP: 202)
-
-For stopping the silence time and stay at the current volume use:
-
-	call: sleepApi/unsetSilenceTime
-    receive: {'status': 'running', 'currentVolume': [decimal]} (HTTP: 202)
-    receive: {'status': 'running', 'acknowledge': 'unsetSilenceTime', 'currentVolume': [decimal]} (HTTP: 202)
+    receive: {'status': 'running', 'acknowledge': 'unsettingTimer', 'currentVolume': [decimal]} (HTTP: 202)
 
 ## others:
     call: [any other request]
@@ -139,12 +134,30 @@ For stopping the silence time and stay at the current volume use:
 
 ***
 
+# Apart of the code
+
+## Contribution & Contributors
+
+I'd love to see your ideas for improving this project!
+The best way to contribute is by submitting a pull request or a [new Github issue](https://github.com/RGreinacher/SleepServer/issues/new). :octocat:
+
+## Author:
+
+[Robert Greinacher](mailto:network@robert-greinacher.de?subject=GitHub SleepServer) / [@RGreinacher](https://twitter.com/RGreinacher) / [LinkedIn](https://www.linkedin.com/profile/view?id=377637892)
+
+Thank you for reading this and for your interest in my work. I hope I could help you or even make your day a little better. Cheers!
+
+## License:
+
+SleepServer is available under the MIT license. See the LICENSE file for more info.
+
+*[Thanks [Tom](https://github.com/TomKnig) for the insiration of this last passage.]*
+
+***
+
 # ToDos:
-- make an API argument for only sleep / sleep with volumen control
-- status with current volume
-- different file for system services
-- GitHub like README (License & Copyright section)
+- do volume changes based on the current volume, not relative to 100%
+- test system access
 - fix bug with daemon & port
-- add verbous option
-- return timeToSleep <-> seconds
+- test verbose option
 - go through the API definition and check if everything is implemented
