@@ -39,7 +39,7 @@ Install Python3 and make sure the following required modules are available:
 - [platform](https://docs.python.org/3/library/platform.html)
 - [pprint](https://docs.python.org/3/library/pprint.html)
 
-Now just run the server with default parameters (not a daemon, port 4444), you won't need administration privileges to do that:
+Now just run the server with default parameters (not a daemon, port 4444). You won't need administration privileges to run SleepServer until you change the port number to under 1024:
 
 	python3 sleepServer.py
 	
@@ -152,12 +152,3 @@ Thank you for reading this and for your interest in my work. I hope I could help
 SleepServer is available under the MIT license. See the LICENSE file for more info.
 
 *[Thanks [Tom](https://github.com/TomKnig) for the insiration of this last passage.]*
-
-***
-
-# ToDos:
-- do volume changes based on the current volume, not relative to 100%
-- test system access
-- fix bug with daemon & port
-- test verbose option
-- go through the API definition and check if everything is implemented

@@ -51,8 +51,7 @@ class SystemControl:
 
     def getVolume(self):
         if self.currentOSIdentifier == kMacOSX:
-            subprocess.call(['osascript', '-e', 'get volume settings'])
-            # TODO: evaluate the response
+            # subprocess.call(['osascript', '-e', 'get volume settings']) # TODO
             return 100
         elif self.currentOSIdentifier == kUnsupportedPlatform:
             print('setting the volume for this platform not yet implemented!')
