@@ -45,6 +45,23 @@ class IssetHelper:
         else:
             return True
 
+    # return a positive (and > 0) integer (the one that comes next in the array) or -1
+    def getIntAfterToken(self, array, token):
+        if (self.isValueForIndex(array, token) and
+            self.isInt(array[array.index(token) + 1]) and
+            int(array[array.index(token) + 1]) > 0):
+
+            return int(array[array.index(token) + 1])
+        return -1
+
+    # return a positive float (the one that comes next in the array) or -1.0
+    def getFloatAfterToken(self, array, token):
+        if (self.isValueForIndex(array, token) and
+            self.isFloat(array[array.index(token) + 1]) and
+            float(array[array.index(token) + 1]) >= 0):
+
+            return float(array[array.index(token) + 1])
+        return -1.0
 
 
 class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
@@ -58,81 +75,61 @@ class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
 
             # set requests:
             if 'immediateSleep' in resourceElements:
-                returnDict = self.networkManager.sleepImmediate()
+                returnDict = self.networkManager.sleepServerRequest({'set': 'immediateSleep'})
                 self.send_response(202)
 
             # set sleep time
             elif 'setSleepTime' in resourceElements:
-                if (self.isValueForIndex(resourceElements, 'setSleepTime') and
-                    self.isInt(resourceElements[resourceElements.index('setSleepTime') + 1]) and
-                    int(resourceElements[resourceElements.index('setSleepTime') + 1]) > 0):
-                    
-                    # sleep time identified and correct
-                    returnDict = self.networkManager.setSleepTime(int(resourceElements[resourceElements.index('setSleepTime') + 1]))
+                time = self.getIntAfterToken(resourceElements, 'setSleepTime') # identify sleep time
+                if time > 0:
+                    returnDict = self.networkManager.sleepServerRequest({'set': 'sleepTimer', 'time': time})
                     self.send_response(202)
-
                 else:
-                    # sleep time not set, not right after the 'setSleepTime' keywork in the request, not an integer or not greater than 0
                     if kBeVerbose: print('NetworkManager: error parsing sleep time')
-                    returnDict = {'errorMessage': 'bad sleep time'}
+                    returnDict = {'errorMessage': 'bad sleep time value'}
                     self.send_response(400)
 
             # set silence time
             elif 'setSilenceTime' in resourceElements:
-                if (self.isValueForIndex(resourceElements, 'setSilenceTime') and
-                    self.isInt(resourceElements[resourceElements.index('setSilenceTime') + 1]) and
-                    int(resourceElements[resourceElements.index('setSilenceTime') + 1]) > 0):
-                    
-                    # silence time identified and correct
-                    returnDict = self.networkManager.setSilenceTime(int(resourceElements[resourceElements.index('setSilenceTime') + 1]))
+                time = self.getIntAfterToken(resourceElements, 'setSilenceTime') # identify silence time
+                if time > 0:
+                    returnDict = self.networkManager.sleepServerRequest({'set': 'silenceTimer', 'time': time})
                     self.send_response(202)
-
                 else:
-                    # silence time not set, not right after the 'setSilenceTime' keywork in the request, not an integer or not greater than 0
                     if kBeVerbose: print('NetworkManager: error parsing silence time')
-                    returnDict = {'errorMessage': 'bad silence time'}
+                    returnDict = {'errorMessage': 'bad silence time value'}
                     self.send_response(400)
 
             # set good night time
             elif 'setGoodNightTime' in resourceElements:
-                if (self.isValueForIndex(resourceElements, 'setGoodNightTime') and
-                    self.isInt(resourceElements[resourceElements.index('setGoodNightTime') + 1]) and
-                    int(resourceElements[resourceElements.index('setGoodNightTime') + 1]) > 0):
-                    
-                    # good night time identified and correct
-                    returnDict = self.networkManager.setGoodNightTime(float(resourceElements[resourceElements.index('setGoodNightTime') + 1]))
+                time = self.getIntAfterToken(resourceElements, 'setGoodNightTime') # identify good night time
+                if time:
+                    returnDict = self.networkManager.sleepServerRequest({'set': 'goodNightTimer', 'time': time})
                     self.send_response(202)
-
                 else:
-                    # good night time not set, not right after the 'setGoodNightTime' keywork in the request, not an integer or not greater than 0
                     if kBeVerbose: print('NetworkManager: error parsing good night time')
-                    returnDict = {'errorMessage': 'bad good night time'}
+                    returnDict = {'errorMessage': 'bad good night time value'}
                     self.send_response(400)
 
             # set volume
             elif 'setVolume' in resourceElements:
-                if (self.isValueForIndex(resourceElements, 'setVolume') and
-                    self.isFloat(resourceElements[resourceElements.index('setVolume') + 1]) and
-                    float(resourceElements[resourceElements.index('setVolume') + 1]) >= 0):
-                    
-                    # good night time identified and correct
-                    returnDict = self.networkManager.setVolume(float(resourceElements[resourceElements.index('setVolume') + 1]))
+                volume = self.getFloatAfterToken(resourceElements, 'setVolume') # identify the volume value
+                if volume >= 0:
+                    returnDict = self.networkManager.sleepServerRequest({'set': 'volume', 'percent': volume})
                     self.send_response(202)
-
                 else:
-                    # good night time not set, not right after the 'setVolume' keywork in the request, not an integer or not greater than 0
                     if kBeVerbose: print('NetworkManager: error parsing the volume percentage')
-                    returnDict = {'errorMessage': 'bad volume percentage'}
+                    returnDict = {'errorMessage': 'bad volume value'}
                     self.send_response(400)
 
             # unset / reset requests:
             elif 'reset' in resourceElements:
-                returnDict = self.networkManager.unsetTimer()
+                returnDict = self.networkManager.sleepServerRequest({'unset': 'timer'})
                 self.send_response(202)
 
             # status requests:
             elif 'status' in resourceElements:
-                returnDict = self.networkManager.getStatus()
+                returnDict = self.networkManager.sleepServerRequest({'get': 'status'})
                 self.send_response(200)
 
         # error handling for all other requests:
@@ -192,27 +189,6 @@ class AsyncNetworkManager(Thread, IssetHelper):
         else:
             print('AsyncNetworkManager: can\'t read queued values!')
             pprint.pprint(communicatedMessage)
-
-    def sleepImmediate(self):
-        return self.sleepServerRequest({'set': 'immediateSleep'})
-
-    def setSleepTime(self, time):
-        return self.sleepServerRequest({'set': 'sleepTimer', 'time': time})
-
-    def setSilenceTime(self, time):
-        return self.sleepServerRequest({'set': 'silenceTimer', 'time': time})
-
-    def setGoodNightTime(self, time):
-        return self.sleepServerRequest({'set': 'goodNightTimer', 'time': time})
-
-    def setVolume(self, percent):
-        return self.sleepServerRequest({'set': 'volume', 'percent': percent})
-
-    def unsetTimer(self):
-        return self.sleepServerRequest({'unset': 'timer'})
-
-    def getStatus(self):
-        return self.sleepServerRequest({'get': 'status'})
 
 
 
