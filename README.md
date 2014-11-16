@@ -1,12 +1,12 @@
 # SleepServer
 
-Python3, HTTP API for hibernation and volume control.
+Python3 based HTTP API for hibernation and volume control.
 
 ## The quick look:
 
 ### Why?
 
-Because getting out of bed just to shut down your music playing computer sucks! I want to do that remotly. Or set a timer. Over the air. From out of my bed. And best if it turns down the volume before it hibernates itself!
+Because getting out of bed just to shut down your music playing computer is inconvenient! I want to do that remotly. Or set a timer. Over the air. From out of my bed. And best if it turns down the volume before it hibernates itself!
 
 ### How?
 
@@ -24,7 +24,12 @@ The server is written with ❤ and in Python3 and uses mostly standard Python co
 
 The `systemControl.py` is a separate file and handles every system interaction, like setting the system to sleep or accessing the volume. This is made to easily extend the supported platforms. As a developer, you can easily add the specific command of the mentioned tasks for your platform in that class. This way you do not have to read through the hunderets of lines of code of the `sleepServer.py`
 
-**Supported platforms:** The server is currently tested on *Mac OSX 10.6* (32-bit Intel) and *Mac OSX 10.10*. Please try it on serveral other platforms and extend the system interaction commands if necessary.
+**Supported platforms:**
+- Mac OSX 10.6
+- Mac OSX 10.10
+- ARCH Linux *(Kernel 3.17, SystemD)*
+
+Try it on serveral other platforms and extend the system interaction commands if necessary. The code therefor (`systemControl.py`) is self-explaining.
 
 ## Get it running
 Install Python3 and make sure the following required modules are available:
@@ -39,7 +44,7 @@ Install Python3 and make sure the following required modules are available:
 - [platform](https://docs.python.org/3/library/platform.html)
 - [pprint](https://docs.python.org/3/library/pprint.html)
 
-Now just run the server with default parameters (not a daemon, port 4444). You won't need administration privileges to run SleepServer until you change the port number to under 1024:
+Run the server with default parameters (not a daemon, port 4444). You won't need administration privileges to run SleepServer until you change the port number to under 1024:
 
 	python3 sleepServer.py
 	
