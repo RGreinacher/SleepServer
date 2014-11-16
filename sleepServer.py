@@ -213,16 +213,12 @@ class SleepServer(Thread, IssetHelper):
         self.networkQueueEvent = Event()
         self.systemControl = SystemControl(kBeVerbose)
 
-        self.timerRunning = Event()
         self.sleepTimeRunning = Event()
         self.silenceTimeRunning = Event()
         self.goodNightTimeRunning = Event()
 
-        self.timeToSleep = -1
-        self.timeToSilence = -1
-        self.timeToGoodNight = -1
-        self.initialGoodNightTime = -1
-        self.initialSileneTime = -1
+        self.timeLeft = -1
+        self.initialTime = -1
         self.status = kNormalStatus
 
         # inital method calls
@@ -248,14 +244,7 @@ class SleepServer(Thread, IssetHelper):
 
                 # handle sleep timer requests
                 elif communicatedMessage['set'] == 'sleepTimer' and self.isset(communicatedMessage, 'time'):
-                    if self.isInt(communicatedMessage['time']):
-                        if kBeVerbose: print('SleepServer: receiving a setSleepTime command with', int(communicatedMessage['time']), 'seconds')
-                        self.resetServer()
-                        self.status = kSleepTimerStatus
-                        self.timeToSleep = int(communicatedMessage['time'])
-
-                        self.sleepTimeRunning.set()
-                        self.timerRunning.set()
+                    if self.isInt(communicatedMessage['time']) and self.setSleepTime(int(communicatedMessage['time'])):
                         self.respondToNetworkThread(self.getStatus())
                     else:
                         if kBeVerbose: print('SleepServer: error parsing the received setSleepTime command')
@@ -263,18 +252,7 @@ class SleepServer(Thread, IssetHelper):
 
                 # handle silence timer requests
                 elif communicatedMessage['set'] == 'silenceTimer' and self.isset(communicatedMessage, 'time'):
-                    if self.isInt(communicatedMessage['time']):
-                        if kBeVerbose: print('SleepServer: receiving a setSilenceTime command with', int(communicatedMessage['time']), 'seconds')
-                        self.resetServer()
-                        self.status = kSilenceTimerStatus
-                        self.timeToSilence = int(communicatedMessage['time'])
-                        self.initialSileneTime = self.timeToSilence
-
-                        self.currentVolume = 100
-                        self.volumeControl(self.currentVolume)
-
-                        self.silenceTimeRunning.set()
-                        self.timerRunning.set()
+                    if self.isInt(communicatedMessage['time']) and self.setSilenceTime(int(communicatedMessage['time'])):
                         self.respondToNetworkThread(self.getStatus())
                     else:
                         if kBeVerbose: print('SleepServer: error parsing the received setSilenceTime command')
@@ -282,15 +260,7 @@ class SleepServer(Thread, IssetHelper):
 
                 # handle good night timer requests
                 elif communicatedMessage['set'] == 'goodNightTimer' and self.isset(communicatedMessage, 'time'):
-                    if self.isInt(communicatedMessage['time']):
-                        if kBeVerbose: print('SleepServer: receiving a setGoodNightTime command with', int(communicatedMessage['time']), 'seconds')
-                        self.resetServer()
-                        self.status = kGoodNightTimerStatus
-                        self.timeToGoodNight = int(communicatedMessage['time'])
-                        self.initialGoodNightTime = self.timeToGoodNight
-
-                        self.goodNightTimeRunning.set()
-                        self.timerRunning.set()
+                    if self.isInt(communicatedMessage['time']) and self.setGoodNightTime(int(communicatedMessage['time'])):
                         self.respondToNetworkThread(self.getStatus())
                     else:
                         if kBeVerbose: print('SleepServer: error parsing the received setSleepTime command')
@@ -310,7 +280,7 @@ class SleepServer(Thread, IssetHelper):
             elif self.isset(communicatedMessage, 'unset'):
                 if communicatedMessage['unset'] == 'timer':
                     if kBeVerbose: print('SleepServer: receiving a unset sleepTimer command')
-                    if self.timerRunning.isSet():
+                    if self.sleepTimeRunning.isSet() or self.silenceTimeRunning.isSet() or self.goodNightTimeRunning.isSet():
                         self.resetServer()
                         status = self.getStatus()
                         status['acknowledge'] = 'unsettingTimer'
@@ -330,36 +300,36 @@ class SleepServer(Thread, IssetHelper):
                 pprint.pprint(communicatedMessage)
 
     def timerTick(self):
-        if self.timerRunning.isSet():
+        if self.sleepTimeRunning.isSet() or self.silenceTimeRunning.isSet() or self.goodNightTimeRunning.isSet():
 
             # good night time handling; sleep timer and volume decreasing
             if self.goodNightTimeRunning.isSet():
-                if kBeVerbose: print('good night timer tick:', self.timeToGoodNight)
-                if self.timeToGoodNight > 0:
-                    self.timeToGoodNight -= 1
+                if kBeVerbose: print('good night timer tick:', self.timeLeft)
+                if self.timeLeft > 0:
+                    self.timeLeft -= 1
 
                     # start changing the volume after getting below 10 min:
-                    if self.initialGoodNightTime > kGoodNightTimeToStartWithVolumeDecrease and self.timeToGoodNight <= kGoodNightTimeToStartWithVolumeDecrease:
-                        self.volumeControl((100 * self.timeToGoodNight) / kGoodNightTimeToStartWithVolumeDecrease)
-                    elif self.initialGoodNightTime <= kGoodNightTimeToStartWithVolumeDecrease:
-                        self.volumeControl((100 * self.timeToGoodNight) / self.initialGoodNightTime)
+                    if self.initialTime > kGoodNightTimeToStartWithVolumeDecrease and self.timeLeft <= kGoodNightTimeToStartWithVolumeDecrease:
+                        self.volumeControl((100 * self.timeLeft) / kGoodNightTimeToStartWithVolumeDecrease)
+                    elif self.initialTime <= kGoodNightTimeToStartWithVolumeDecrease:
+                        self.volumeControl((100 * self.timeLeft) / self.initialTime)
                 else:
                     self.sleep()
 
             # handle only the sleep time
             elif self.sleepTimeRunning.isSet():
-                if kBeVerbose: print('sleep timer tick:', self.timeToSleep)
-                if self.timeToSleep > 0:
-                    self.timeToSleep -= 1
+                if kBeVerbose: print('sleep timer tick:', self.timeLeft)
+                if self.timeLeft > 0:
+                    self.timeLeft -= 1
                 else:
                     self.sleep()
 
             # handle only the volume-down-to-silence-time
             elif self.silenceTimeRunning.isSet():
-                if kBeVerbose: print('silence timer tick:', self.timeToSilence)
-                if self.timeToSilence > 0:
-                    self.timeToSilence -= 1
-                    self.volumeControl((100 * self.timeToSilence) / self.initialSileneTime)
+                if kBeVerbose: print('silence timer tick:', self.timeLeft)
+                if self.timeLeft > 0:
+                    self.timeLeft -= 1
+                    self.volumeControl((100 * self.timeLeft) / self.initialTime)
                 else:
                     self.resetServer()
 
@@ -370,11 +340,12 @@ class SleepServer(Thread, IssetHelper):
         if self.isInt(time):
             time = int(time)
             if time > 0:
-                if kBeVerbose: print('SleepServer: set sleep time to', time)
+                if kBeVerbose: print('SleepServer: receiving a setSleepTime command with', time, 'seconds')
+                self.resetServer()
                 self.status = kSleepTimerStatus
-                self.timeToSleep = time
+                self.timeLeft = time
+
                 self.sleepTimeRunning.set()
-                self.timerRunning.set()
                 return True
         return False
 
@@ -382,15 +353,15 @@ class SleepServer(Thread, IssetHelper):
         if self.isInt(time):
             time = int(time)
             if time > 0:
-                if kBeVerbose: print('SleepServer: set silence time to', time)
+                if kBeVerbose: print('SleepServer: receiving a setSilenceTime command with', time, 'seconds')
+                self.resetServer()
                 self.status = kSilenceTimerStatus
-                self.timeToSilence = time
+                self.initialTime = self.timeLeft = time
 
                 self.currentVolume = 100
                 self.volumeControl(self.currentVolume)
 
                 self.silenceTimeRunning.set()
-                self.timerRunning.set()
                 return True
         return False
 
@@ -398,15 +369,15 @@ class SleepServer(Thread, IssetHelper):
         if self.isInt(time):
             time = int(time)
             if time > 0:
-                if kBeVerbose: print('SleepServer: set good night time to', time)
+                if kBeVerbose: print('SleepServer: receiving a setGoodNightTime command with', time, 'seconds')
+                self.resetServer()
                 self.status = kGoodNightTimerStatus
-                self.timeToGoodNight = time
+                self.initialTime = self.timeLeft = time
 
                 self.currentVolume = 100
                 self.volumeControl(self.currentVolume)
 
                 self.goodNightTimeRunning.set()
-                self.timerRunning.set()
                 return True
         return False
 
@@ -414,28 +385,21 @@ class SleepServer(Thread, IssetHelper):
         if kBeVerbose: print('SleepServer: resetting the server')
 
         # reset events
-        self.timerRunning.clear()
         self.sleepTimeRunning.clear()
         self.silenceTimeRunning.clear()
         self.goodNightTimeRunning.clear()
 
         # reset members
-        self.timeToSleep = -1
-        self.timeToSilence = -1
-        self.timeToGoodNight = -1
-        self.initialGoodNightTime = -1
-        self.initialSileneTime = -1
+        self.timeLeft = -1
+        self.initialTime = -1
         self.status = kNormalStatus
 
     def getStatus(self):
         statusDictionary = {'status': self.status, 'currentVolume': self.currentVolume}
-        if self.sleepTimeRunning.isSet():
-            statusDictionary['timeToSleep'] = self.timeToSleep
-        if self.goodNightTimeRunning.isSet():
-            statusDictionary['timeToSleep'] = self.timeToGoodNight
+        if self.sleepTimeRunning.isSet() or self.goodNightTimeRunning.isSet():
+            statusDictionary['timeToSleep'] = self.timeLeft
         elif self.silenceTimeRunning.isSet():
-            statusDictionary['timeToSilence'] = self.timeToSilence
-
+            statusDictionary['timeToSilence'] = self.timeLeft
         return statusDictionary
 
     def respondToNetworkThread(self, dictionary):
