@@ -17,7 +17,7 @@ class SystemControl:
         # define OS identification for OS dependent sleep / volume commands:
         if kMacOSX in platform.platform():
             self.currentOSIdentifier = kMacOSX
-        elif self.kLinuxArchSystemD in platform.platform():
+        elif kLinuxArchSystemD in platform.platform():
             self.currentOSIdentifier = kLinuxArchSystemD
         else:
             self.currentOSIdentifier = kUnsupportedPlatform
