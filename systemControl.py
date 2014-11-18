@@ -29,7 +29,7 @@ class SystemControl:
         if self.currentOSIdentifier == MAC_OS_X:
             subprocess.call(['osascript', '-e', 'tell application "System Events" to sleep'])
         elif self.currentOSIdentifier == LINUX:
-            subprocess.call(['systemctl', 'suspend'])
+            subprocess.call('dbus-send --system --print-reply --dest=org.freedesktop.UPower /org/freedesktop/UPower org.freedesktop.UPower.Suspend', shell = True)
         elif self.currentOSIdentifier == UNSUPPORTED_PLATFORM:
             print('sleep for this platform not yet implemented!')
 
@@ -39,7 +39,7 @@ class SystemControl:
         if self.currentOSIdentifier == MAC_OS_X:
             subprocess.call(['osascript', '-e', 'tell application "System Events" to shut down'])
         elif self.currentOSIdentifier == LINUX:
-            subprocess.call(['systemctl', 'poweroff'])
+            subprocess.call('dbus-send --system --print-reply --dest=org.freedesktop.ConsoleKit /org/freedesktop/ConsoleKit/Manager org.freedesktop.ConsoleKit.Manager.Stop', shell = True)
         elif self.currentOSIdentifier == UNSUPPORTED_PLATFORM:
             print('shutdown for this platform not yet implemented!')
 
@@ -64,7 +64,7 @@ class SystemControl:
             # subprocess.call(['osascript', '-e', 'get volume settings']) # TODO
             return 100
         elif self.currentOSIdentifier == LINUX:
-            volume = subprocess.checkoutput('amixer -D pulse get Master', shell = True)
+            volume = subprocess.check_output('amixer -D pulse get Master', shell = True)
             volume = re.search('([0-9]+)%', str(volume))
             volume = volume.group(1)
             return int(volume)
