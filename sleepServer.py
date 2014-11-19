@@ -143,7 +143,10 @@ class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
         self.end_headers()
 
         message = json.dumps(returnDict, ensure_ascii=False)
-        self.wfile.write(bytes(message, 'UTF-8'))
+        try:
+            self.wfile.write(bytes(message, 'UTF-8'))
+        except BrokenPipeError:
+            if BE_VERBOSE: print('NetworkManager: current connection failed (broken pipe)')
         return
 
 
@@ -310,9 +313,9 @@ class SleepServer(Thread, IssetHelper):
 
                     # start changing the volume after getting below 10 min:
                     if self.initialTime > GOOD_NIGHT_TIME_TO_START_WITH_VOLUME_DECREASE and self.timeLeft <= GOOD_NIGHT_TIME_TO_START_WITH_VOLUME_DECREASE:
-                        self.volumeControl((100 * self.timeLeft) / GOOD_NIGHT_TIME_TO_START_WITH_VOLUME_DECREASE)
+                        self.volumeControl((self.currentVolume * self.timeLeft) / GOOD_NIGHT_TIME_TO_START_WITH_VOLUME_DECREASE)
                     elif self.initialTime <= GOOD_NIGHT_TIME_TO_START_WITH_VOLUME_DECREASE:
-                        self.volumeControl((100 * self.timeLeft) / self.initialTime)
+                        self.volumeControl((self.currentVolume * self.timeLeft) / self.initialTime)
                 else:
                     self.sleep()
 
@@ -329,7 +332,7 @@ class SleepServer(Thread, IssetHelper):
                 if BE_VERBOSE: print('silence timer tick:', self.timeLeft)
                 if self.timeLeft > 0:
                     self.timeLeft -= 1
-                    self.volumeControl((100 * self.timeLeft) / self.initialTime)
+                    self.volumeControl((self.currentVolume * self.timeLeft) / self.initialTime)
                 else:
                     self.resetServer()
 
@@ -357,9 +360,7 @@ class SleepServer(Thread, IssetHelper):
                 self.resetServer()
                 self.status = SILENCE_TIMER_STATUS
                 self.initialTime = self.timeLeft = time
-
-                self.currentVolume = 100
-                self.volumeControl(self.currentVolume)
+                self.currentVolume = self.systemControl.getVolume()
 
                 self.silenceTimeRunning.set()
                 return True
@@ -373,9 +374,7 @@ class SleepServer(Thread, IssetHelper):
                 self.resetServer()
                 self.status = GOOD_NIGHT_TIMER_STATUS
                 self.initialTime = self.timeLeft = time
-
-                self.currentVolume = 100
-                self.volumeControl(self.currentVolume)
+                self.currentVolume = self.systemControl.getVolume()
 
                 self.goodNightTimeRunning.set()
                 return True
@@ -395,7 +394,9 @@ class SleepServer(Thread, IssetHelper):
         self.status = NORMAL_STATUS
 
     def getStatus(self):
+        self.currentVolume = self.systemControl.getVolume()
         statusDictionary = {'status': self.status, 'currentVolume': self.currentVolume}
+
         if self.sleepTimeRunning.isSet() or self.goodNightTimeRunning.isSet():
             statusDictionary['timeToSleep'] = self.timeLeft
         elif self.silenceTimeRunning.isSet():

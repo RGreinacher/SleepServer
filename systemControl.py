@@ -61,8 +61,10 @@ class SystemControl:
 
     def getVolume(self):
         if self.currentOSIdentifier == MAC_OS_X:
-            # subprocess.call(['osascript', '-e', 'get volume settings']) # TODO
-            return 100
+            volume = subprocess.check_output(['osascript', '-e', 'get volume settings'])
+            volume = re.search('([0-9]+)', str(volume))
+            volume = volume.group(1)
+            return int(volume)
         elif self.currentOSIdentifier == LINUX:
             volume = subprocess.check_output('amixer -D pulse get Master', shell = True)
             volume = re.search('([0-9]+)%', str(volume))
