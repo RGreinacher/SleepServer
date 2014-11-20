@@ -86,7 +86,7 @@ class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
                     self.send_response(202)
                 else:
                     if BE_VERBOSE: print('NetworkManager: error parsing sleep time')
-                    returnDict = {'errorMessage': 'bad sleep time value'}
+                    returnDict = {'error': 'bad sleep time value'}
                     self.send_response(400)
 
             # set silence time
@@ -97,7 +97,7 @@ class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
                     self.send_response(202)
                 else:
                     if BE_VERBOSE: print('NetworkManager: error parsing silence time')
-                    returnDict = {'errorMessage': 'bad silence time value'}
+                    returnDict = {'error': 'bad silence time value'}
                     self.send_response(400)
 
             # set good night time
@@ -108,7 +108,7 @@ class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
                     self.send_response(202)
                 else:
                     if BE_VERBOSE: print('NetworkManager: error parsing good night time')
-                    returnDict = {'errorMessage': 'bad good night time value'}
+                    returnDict = {'error': 'bad good night time value'}
                     self.send_response(400)
 
             # set volume
@@ -119,7 +119,7 @@ class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
                     self.send_response(202)
                 else:
                     if BE_VERBOSE: print('NetworkManager: error parsing the volume percentage')
-                    returnDict = {'errorMessage': 'bad volume value'}
+                    returnDict = {'error': 'bad volume value'}
                     self.send_response(400)
 
             # unset / reset requests:
@@ -135,7 +135,7 @@ class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
         # error handling for all other requests:
         if returnDict == {}:
             if BE_VERBOSE: print('NetworkManager: request with unrecognized arguments')
-            returnDict = {'errorMessage': 'wrong address, wrong parameters or no such resource'}
+            returnDict = {'error': 'wrong address, wrong parameters or no such resource'}
             self.send_response(404)
 
         # headers and define the response content type
@@ -222,6 +222,7 @@ class SleepServer(Thread, IssetHelper):
 
         self.timeLeft = -1
         self.initialTime = -1
+        self.volumeAtSilenceTimeStart = -1
         self.status = NORMAL_STATUS
 
         # inital method calls
@@ -273,8 +274,13 @@ class SleepServer(Thread, IssetHelper):
                 elif communicatedMessage['set'] == 'volume' and self.isset(communicatedMessage, 'percent'):
                     if self.isFloat(communicatedMessage['percent']):
                         if BE_VERBOSE: print('SleepServer: receiving a setVolume command with', float(communicatedMessage['percent']), '%')
-                        self.volumeControl(float(communicatedMessage['percent']))
-                        self.respondToNetworkThread(self.getStatus())
+                        if (self.silenceTimeRunning.isSet() or self.goodNightTimeRunning.isSet()) and self.timeLeft < GOOD_NIGHT_TIME_TO_START_WITH_VOLUME_DECREASE:
+                            if BE_VERBOSE: print('SleepServer: can\'t set volume; controled by silence- or goodNightTimer')
+                            self.respondToNetworkThread({'error': 'volume is auto-controlled'})
+                        else:
+                            self.volumeControl(float(communicatedMessage['percent']))
+                            self.volumeAtSilenceTimeStart = self.systemControl.getVolume()
+                            self.respondToNetworkThread(self.getStatus())
                     else:
                         if BE_VERBOSE: print('SleepServer: error parsing the received setVolume command')
                         self.respondToNetworkThread({'error': 'bad volume percentage'})
@@ -313,9 +319,9 @@ class SleepServer(Thread, IssetHelper):
 
                     # start changing the volume after getting below 10 min:
                     if self.initialTime > GOOD_NIGHT_TIME_TO_START_WITH_VOLUME_DECREASE and self.timeLeft <= GOOD_NIGHT_TIME_TO_START_WITH_VOLUME_DECREASE:
-                        self.volumeControl((self.currentVolume * self.timeLeft) / GOOD_NIGHT_TIME_TO_START_WITH_VOLUME_DECREASE)
+                        self.volumeControl((self.volumeAtSilenceTimeStart * self.timeLeft) / GOOD_NIGHT_TIME_TO_START_WITH_VOLUME_DECREASE)
                     elif self.initialTime <= GOOD_NIGHT_TIME_TO_START_WITH_VOLUME_DECREASE:
-                        self.volumeControl((self.currentVolume * self.timeLeft) / self.initialTime)
+                        self.volumeControl((self.volumeAtSilenceTimeStart * self.timeLeft) / self.initialTime)
                 else:
                     self.sleep()
 
@@ -332,7 +338,7 @@ class SleepServer(Thread, IssetHelper):
                 if BE_VERBOSE: print('silence timer tick:', self.timeLeft)
                 if self.timeLeft > 0:
                     self.timeLeft -= 1
-                    self.volumeControl((self.currentVolume * self.timeLeft) / self.initialTime)
+                    self.volumeControl((self.volumeAtSilenceTimeStart * self.timeLeft) / self.initialTime)
                 else:
                     self.resetServer()
 
@@ -361,6 +367,7 @@ class SleepServer(Thread, IssetHelper):
                 self.status = SILENCE_TIMER_STATUS
                 self.initialTime = self.timeLeft = time
                 self.currentVolume = self.systemControl.getVolume()
+                self.volumeAtSilenceTimeStart = self.currentVolume
 
                 self.silenceTimeRunning.set()
                 return True
@@ -375,6 +382,7 @@ class SleepServer(Thread, IssetHelper):
                 self.status = GOOD_NIGHT_TIMER_STATUS
                 self.initialTime = self.timeLeft = time
                 self.currentVolume = self.systemControl.getVolume()
+                self.volumeAtSilenceTimeStart = self.currentVolume
 
                 self.goodNightTimeRunning.set()
                 return True
@@ -391,6 +399,7 @@ class SleepServer(Thread, IssetHelper):
         # reset members
         self.timeLeft = -1
         self.initialTime = -1
+        self.volumeAtSilenceTimeStart = -1
         self.status = NORMAL_STATUS
 
     def getStatus(self):
