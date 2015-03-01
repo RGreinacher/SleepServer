@@ -68,19 +68,30 @@ class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
     def setSleepServer(self, networkManager):
         self.networkManager = networkManager
 
+    def prepareResourceElements(self):
+        self.resourceElements = []
+        self.jsonpCallback = ''
+
+        for element in self.path.split('/'):
+            if 'callback' in element:
+                secondArgumentPosition = element.find('&')
+                self.jsonpCallback = element[10:secondArgumentPosition]
+            else:
+                self.resourceElements.append(element)
+
     def do_GET(self):
-        resourceElements = self.path.split('/')
+        self.prepareResourceElements()
         returnDict = {}
-        if 'sleepApi' in resourceElements:
+        if 'sleepApi' in self.resourceElements:
 
             # set requests:
-            if 'immediateSleep' in resourceElements:
+            if 'immediateSleep' in self.resourceElements:
                 returnDict = self.networkManager.sleepServerRequest({'set': 'immediateSleep'})
                 self.send_response(202)
 
             # set sleep time
-            elif 'setSleepTime' in resourceElements:
-                time = self.getIntAfterToken(resourceElements, 'setSleepTime') # identify sleep time
+            elif 'setSleepTime' in self.resourceElements:
+                time = self.getIntAfterToken(self.resourceElements, 'setSleepTime') # identify sleep time
                 if time > 0:
                     returnDict = self.networkManager.sleepServerRequest({'set': 'sleepTimer', 'time': time})
                     self.send_response(202)
@@ -90,8 +101,8 @@ class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
                     self.send_response(400)
 
             # set silence time
-            elif 'setSilenceTime' in resourceElements:
-                time = self.getIntAfterToken(resourceElements, 'setSilenceTime') # identify silence time
+            elif 'setSilenceTime' in self.resourceElements:
+                time = self.getIntAfterToken(self.resourceElements, 'setSilenceTime') # identify silence time
                 if time > 0:
                     returnDict = self.networkManager.sleepServerRequest({'set': 'silenceTimer', 'time': time})
                     self.send_response(202)
@@ -101,8 +112,8 @@ class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
                     self.send_response(400)
 
             # set good night time
-            elif 'setGoodNightTime' in resourceElements:
-                time = self.getIntAfterToken(resourceElements, 'setGoodNightTime') # identify good night time
+            elif 'setGoodNightTime' in self.resourceElements:
+                time = self.getIntAfterToken(self.resourceElements, 'setGoodNightTime') # identify good night time
                 if time:
                     returnDict = self.networkManager.sleepServerRequest({'set': 'goodNightTimer', 'time': time})
                     self.send_response(202)
@@ -112,8 +123,8 @@ class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
                     self.send_response(400)
 
             # set volume
-            elif 'setVolume' in resourceElements:
-                volume = self.getFloatAfterToken(resourceElements, 'setVolume') # identify the volume value
+            elif 'setVolume' in self.resourceElements:
+                volume = self.getFloatAfterToken(self.resourceElements, 'setVolume') # identify the volume value
                 if volume >= 0:
                     returnDict = self.networkManager.sleepServerRequest({'set': 'volume', 'percent': volume})
                     self.send_response(202)
@@ -123,12 +134,12 @@ class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
                     self.send_response(400)
 
             # unset / reset requests:
-            elif 'reset' in resourceElements:
+            elif 'reset' in self.resourceElements:
                 returnDict = self.networkManager.sleepServerRequest({'unset': 'timer'})
                 self.send_response(202)
 
             # status requests:
-            elif 'status' in resourceElements:
+            elif 'status' in self.resourceElements:
                 returnDict = self.networkManager.sleepServerRequest({'get': 'status'})
                 self.send_response(200)
 
@@ -138,11 +149,17 @@ class HTTPHandler(BaseHTTPRequestHandler, IssetHelper):
             returnDict = {'error': 'wrong address, wrong parameters or no such resource'}
             self.send_response(404)
 
-        # headers and define the response content type
-        self.send_header('Content-type', 'application/json')
+        # create a message that may be encapsulated in a JSONP callback function
+        if self.jsonpCallback != '':
+            self.send_header('Content-type', 'application/text')
+            jsonMessage = json.dumps(returnDict, ensure_ascii = False)
+            message = self.jsonpCallback + '(' + jsonMessage + ');'
+        else:
+            self.send_header('Content-type', 'application/json')
+            message = json.dumps(returnDict, ensure_ascii = False)
+
         self.end_headers()
 
-        message = json.dumps(returnDict, ensure_ascii=False)
         try:
             self.wfile.write(bytes(message, 'UTF-8'))
         except BrokenPipeError:
